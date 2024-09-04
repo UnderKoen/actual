@@ -19,7 +19,12 @@ import {
   ungroupTransaction,
 } from '../../shared/transactions';
 import { fastSetMerge } from '../../shared/util';
-import { RuleConditionEntity, RuleEntity } from '../../types/models';
+import {
+  RuleActionEntity,
+  RuleConditionEntity,
+  RuleEntity,
+  TransactionEntity,
+} from '../../types/models';
 import { RuleError } from '../errors';
 import { Schedule as RSchedule } from '../util/rschedule';
 
@@ -269,8 +274,8 @@ const CONDITION_TYPES = {
   },
 };
 
-export class Condition {
-  field;
+export class Condition<T extends object = TransactionEntity> {
+  field: keyof T & string;
   op;
   options;
   rawValue;
@@ -278,7 +283,7 @@ export class Condition {
   unparsedValue;
   value;
 
-  constructor(op, field, value, options, fieldTypes) {
+  constructor(op, field: keyof T & string, value, options, fieldTypes) {
     const typeName = fieldTypes.get(field);
     assert(typeName, 'internal', 'Invalid condition field: ' + field);
 
@@ -315,8 +320,8 @@ export class Condition {
     this.type = typeName;
   }
 
-  eval(object) {
-    let fieldValue = object[this.field];
+  eval(object: T): boolean {
+    let fieldValue: unknown = object[this.field];
     if (fieldValue === undefined) {
       return false;
     }
@@ -329,13 +334,13 @@ export class Condition {
 
     if (type === 'number' && this.options) {
       if (this.options.outflow) {
-        if (fieldValue > 0) {
+        if ((fieldValue as number) > 0) {
           return false;
         }
 
         fieldValue = -fieldValue;
       } else if (this.options.inflow) {
-        if (fieldValue < 0) {
+        if ((fieldValue as number) < 0) {
           return false;
         }
       }
@@ -347,7 +352,7 @@ export class Condition {
       case 'isapprox':
       case 'is':
         if (type === 'date') {
-          if (fieldValue == null) {
+          if (fieldValue == null || typeof fieldValue !== 'string') {
             return false;
           }
 
@@ -384,6 +389,10 @@ export class Condition {
             }
           }
         } else if (type === 'number') {
+          if (typeof fieldValue !== 'number') {
+            return false;
+          }
+
           const number = this.value.value;
           if (this.op === 'isapprox') {
             const threshold = getApproxNumberThreshold(number);
@@ -405,12 +414,12 @@ export class Condition {
         return fieldValue >= low && fieldValue <= high;
       }
       case 'contains':
-        if (fieldValue === null) {
+        if (fieldValue === null || typeof fieldValue !== 'string') {
           return false;
         }
         return fieldValue.indexOf(this.value) !== -1;
       case 'doesNotContain':
-        if (fieldValue === null) {
+        if (fieldValue === null || typeof fieldValue !== 'string') {
           return false;
         }
         return fieldValue.indexOf(this.value) === -1;
@@ -421,7 +430,7 @@ export class Condition {
         return this.value.indexOf(fieldValue) !== -1;
 
       case 'hasTags':
-        if (fieldValue === null) {
+        if (fieldValue === null || typeof fieldValue !== 'string') {
           return false;
         }
         return fieldValue.indexOf(this.value) !== -1;
@@ -434,7 +443,7 @@ export class Condition {
       case 'gt':
         if (fieldValue === null) {
           return false;
-        } else if (type === 'date') {
+        } else if (type === 'date' && typeof fieldValue === 'string') {
           return isAfter(fieldValue, this.value.date);
         }
 
@@ -442,7 +451,7 @@ export class Condition {
       case 'gte':
         if (fieldValue === null) {
           return false;
-        } else if (type === 'date') {
+        } else if (type === 'date' && typeof fieldValue === 'string') {
           return (
             fieldValue === this.value.date ||
             isAfter(fieldValue, this.value.date)
@@ -453,14 +462,14 @@ export class Condition {
       case 'lt':
         if (fieldValue === null) {
           return false;
-        } else if (type === 'date') {
+        } else if (type === 'date' && typeof fieldValue === 'string') {
           return isBefore(fieldValue, this.value.date);
         }
         return fieldValue < extractValue(this.value);
       case 'lte':
         if (fieldValue === null) {
           return false;
-        } else if (type === 'date') {
+        } else if (type === 'date' && typeof fieldValue === 'string') {
           return (
             fieldValue === this.value.date ||
             isBefore(fieldValue, this.value.date)
@@ -468,7 +477,7 @@ export class Condition {
         }
         return fieldValue <= extractValue(this.value);
       case 'matches':
-        if (fieldValue === null) {
+        if (fieldValue === null || typeof fieldValue !== 'string') {
           return false;
         }
         try {
@@ -487,10 +496,10 @@ export class Condition {
     return this.value;
   }
 
-  serialize() {
+  serialize(): RuleConditionEntity {
     return {
       op: this.op,
-      field: this.field,
+      field: this.field as RuleConditionEntity['field'],
       value: this.unparsedValue,
       type: this.type,
       ...(this.options ? { options: this.options } : null),
@@ -507,15 +516,21 @@ const ACTION_OPS = [
 ] as const;
 type ActionOperator = (typeof ACTION_OPS)[number];
 
-export class Action {
-  field;
+export class Action<T extends object = TransactionEntity> {
+  field: (keyof T & string) | null;
   op: ActionOperator;
   options;
   rawValue;
   type;
   value;
 
-  constructor(op: ActionOperator, field, value, options, fieldTypes) {
+  constructor(
+    op: ActionOperator,
+    field: (keyof T & string) | null,
+    value,
+    options,
+    fieldTypes,
+  ) {
     assert(
       ACTION_OPS.includes(op),
       'internal',
@@ -534,7 +549,7 @@ export class Action {
       this.field = null;
       this.type = 'id';
     } else if (op === 'prepend-notes' || op === 'append-notes') {
-      this.field = 'notes';
+      this.field = 'notes' as keyof T & string;
       this.type = 'id';
     }
 
@@ -548,7 +563,7 @@ export class Action {
     this.options = options;
   }
 
-  exec(object) {
+  exec(object: T): void {
     switch (this.op) {
       case 'set':
         object[this.field] = this.value;
@@ -556,13 +571,13 @@ export class Action {
       case 'set-split-amount':
         switch (this.options.method) {
           case 'fixed-amount':
-            object.amount = this.value;
+            object['amount'] = this.value;
             break;
           default:
         }
         break;
       case 'link-schedule':
-        object.schedule = this.value;
+        object['schedule'] = this.value;
         break;
       case 'prepend-notes':
         object[this.field] = object[this.field]
@@ -578,10 +593,11 @@ export class Action {
     }
   }
 
-  serialize() {
+  serialize(): RuleActionEntity {
+    // @ts-expect-error no clue why this is
     return {
       op: this.op,
-      field: this.field,
+      field: this.field as RuleActionEntity['field'],
       value: this.value,
       type: this.type,
       ...(this.options ? { options: this.options } : null),
@@ -589,13 +605,16 @@ export class Action {
   }
 }
 
-function execNonSplitActions(actions: Action[], transaction) {
+function execNonSplitActions<T extends object>(
+  actions: Action<T>[],
+  transaction: T,
+) {
   const update = transaction;
   actions.forEach(action => action.exec(update));
   return update;
 }
 
-export function execActions(actions: Action[], transaction) {
+export function execActions(actions: Action[], transaction: TransactionEntity) {
   const parentActions = actions.filter(action => !action.options?.splitIndex);
   const childActions = actions.filter(action => action.options?.splitIndex);
   const totalSplitCount =
@@ -726,9 +745,9 @@ export function execActions(actions: Action[], transaction) {
   return update;
 }
 
-export class Rule {
-  actions: Action[];
-  conditions: Condition[];
+export class Rule<T extends object = TransactionEntity> {
+  actions: Action<T>[];
+  conditions: Condition<T>[];
   conditionsOp;
   id?: string;
   stage;
@@ -744,9 +763,9 @@ export class Rule {
     id?: string;
     stage?;
     conditionsOp;
-    conditions;
-    actions;
-    fieldTypes;
+    conditions: (RuleConditionEntity & { field: keyof T & string })[];
+    actions: (RuleActionEntity & { field: keyof T & string })[];
+    fieldTypes: Map<string, string>;
   }) {
     this.id = id;
     this.stage = stage;
@@ -759,7 +778,7 @@ export class Rule {
     );
   }
 
-  evalConditions(object): boolean {
+  evalConditions(object: T): boolean {
     if (this.conditions.length === 0) {
       return false;
     }
@@ -770,7 +789,8 @@ export class Rule {
     });
   }
 
-  execActions<T>(object: T): Partial<T> {
+  execActions<P extends Partial<T>>(object: P): Partial<P> {
+    // @ts-expect-error execActions is only for TransactionEntity
     const result = execActions(this.actions, {
       ...object,
     });
@@ -783,7 +803,7 @@ export class Rule {
     return changes;
   }
 
-  exec(object) {
+  exec(object: T): Partial<T> {
     if (this.evalConditions(object)) {
       return this.execActions(object);
     }
@@ -791,7 +811,7 @@ export class Rule {
   }
 
   // Apply is similar to exec but applies the changes for you
-  apply(object) {
+  apply(object: T): T {
     const changes = this.exec(object);
     return Object.assign({}, object, changes);
   }
@@ -811,10 +831,10 @@ export class Rule {
   }
 }
 
-export class RuleIndexer {
+export class RuleIndexer<T extends object = TransactionEntity> {
   field: string;
   method?: string;
-  rules: Map<string, Set<Rule>>;
+  rules: Map<string, Set<Rule<T>>>;
 
   constructor({ field, method }: { field: string; method?: string }) {
     this.field = field;
@@ -822,14 +842,14 @@ export class RuleIndexer {
     this.rules = new Map();
   }
 
-  getIndex(key: string): Set<Rule> {
+  getIndex(key: string): Set<Rule<T>> {
     if (!this.rules.has(key)) {
       this.rules.set(key, new Set());
     }
     return this.rules.get(key);
   }
 
-  getIndexForValue(value: unknown): Set<Rule> {
+  getIndexForValue(value: unknown): Set<Rule<T>> {
     return this.getIndex(this.getKey(value) || '*');
   }
 
@@ -843,7 +863,7 @@ export class RuleIndexer {
     return null;
   }
 
-  getIndexes(rule: Rule): Set<Rule>[] {
+  getIndexes(rule: Rule<T>): Set<Rule<T>>[] {
     const cond = rule.conditions.find(cond => cond.field === this.field);
     const indexes = [];
 
@@ -866,21 +886,21 @@ export class RuleIndexer {
     return indexes;
   }
 
-  index(rule: Rule): void {
+  index(rule: Rule<T>): void {
     const indexes = this.getIndexes(rule);
     indexes.forEach(index => {
       index.add(rule);
     });
   }
 
-  remove(rule: Rule): void {
+  remove(rule: Rule<T>): void {
     const indexes = this.getIndexes(rule);
     indexes.forEach(index => {
       index.delete(rule);
     });
   }
 
-  getApplicableRules(object): Set<Rule> {
+  getApplicableRules(object: T): Set<Rule<T>> {
     let indexedRules;
     if (this.field in object) {
       const key = this.getKey(object[this.field]);
@@ -913,7 +933,7 @@ const OP_SCORES: Record<RuleConditionEntity['op'], number> = {
   hasTags: 0,
 };
 
-function computeScore(rule: Rule): number {
+function computeScore<T extends object>(rule: Rule<T>): number {
   const initialScore = rule.conditions.reduce((score, condition) => {
     if (OP_SCORES[condition.op] == null) {
       console.log(`Found invalid operation while ranking: ${condition.op}`);
@@ -938,7 +958,7 @@ function computeScore(rule: Rule): number {
   return initialScore;
 }
 
-function _rankRules(rules: Rule[]): Rule[] {
+function _rankRules<T extends object>(rules: Rule<T>[]): Rule<T>[] {
   const scores = new Map();
   rules.forEach(rule => {
     scores.set(rule, computeScore(rule));
@@ -962,7 +982,9 @@ function _rankRules(rules: Rule[]): Rule[] {
   });
 }
 
-export function rankRules(rules: Iterable<Rule>): Rule[] {
+export function rankRules<T extends object>(
+  rules: Iterable<Rule<T>>,
+): Rule<T>[] {
   let pre = [];
   let normal = [];
   let post = [];
@@ -987,7 +1009,10 @@ export function rankRules(rules: Iterable<Rule>): Rule[] {
   return pre.concat(normal).concat(post);
 }
 
-export function migrateIds(rule: Rule, mappings: Map<string, string>): void {
+export function migrateIds<T extends object>(
+  rule: Rule<T>,
+  mappings: Map<string, string>,
+): void {
   // Go through the in-memory rules and patch up ids that have been
   // "migrated" to other ids. This is a little tricky, but a lot
   // easier than trying to keep an up-to-date mapping in the db. This
@@ -1039,10 +1064,10 @@ export function migrateIds(rule: Rule, mappings: Map<string, string>): void {
 }
 
 // This finds all the rules that reference the `id`
-export function iterateIds(
-  rules: Rule[],
-  fieldName: string,
-  func: (rule: Rule, id: string) => unknown,
+export function iterateIds<T extends object>(
+  rules: Rule<T>[],
+  fieldName: keyof T & string,
+  func: (rule: Rule<T>, id: string) => unknown,
 ): void {
   let i;
 

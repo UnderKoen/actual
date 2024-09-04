@@ -1,4 +1,5 @@
 import { type ScheduleEntity } from './schedule';
+import { TransactionEntity } from './transaction';
 
 export interface NewRuleEntity {
   stage: string;
@@ -131,7 +132,7 @@ export type RuleActionEntity =
   | AppendNoteRuleActionEntity;
 
 export interface SetRuleActionEntity {
-  field: string;
+  field: keyof TransactionEntity & string;
   op: 'set';
   value: unknown;
   options?: {
@@ -141,6 +142,7 @@ export interface SetRuleActionEntity {
 }
 
 export interface SetSplitAmountRuleActionEntity {
+  field: null;
   op: 'set-split-amount';
   value: number;
   options?: {
@@ -150,16 +152,22 @@ export interface SetSplitAmountRuleActionEntity {
 }
 
 export interface LinkScheduleRuleActionEntity {
+  field: null;
   op: 'link-schedule';
   value: ScheduleEntity;
+  options?: undefined;
 }
 
 export interface PrependNoteRuleActionEntity {
+  field: null;
   op: 'prepend-notes';
   value: string;
+  options?: undefined;
 }
 
 export interface AppendNoteRuleActionEntity {
+  field: null;
   op: 'append-notes';
   value: string;
+  options?: undefined;
 }

@@ -46,8 +46,8 @@ export { iterateIds } from './rules';
 
 let allRules;
 let unlistenSync;
-let firstcharIndexer;
-let payeeIndexer;
+let firstcharIndexer: RuleIndexer;
+let payeeIndexer: RuleIndexer;
 
 export function resetState() {
   allRules = new Map();
@@ -206,7 +206,7 @@ export async function loadRules() {
   unlistenSync = addSyncListener(onApplySync);
 }
 
-export function getRules() {
+export function getRules(): Rule[] {
   // This can simply return the in-memory data
   return [...allRules.values()];
 }
@@ -517,7 +517,7 @@ export async function applyActions(
   actions: Array<Action | RuleActionEntity>,
 ) {
   const parsedActions = actions
-    .map(action => {
+    .map((action): Action => {
       if (action instanceof Action) {
         return action;
       }
@@ -542,7 +542,7 @@ export async function applyActions(
 
         return new Action(
           action.op,
-          action.field,
+          action.field as keyof TransactionEntity,
           action.value,
           action.options,
           FIELD_TYPES,
@@ -660,7 +660,7 @@ export async function updatePayeeRenameRule(fromNames: string[], to: string) {
     await updateRule(rule);
     return renameRule.id;
   } else {
-    const rule = new Rule({
+    const rule = new Rule<TransactionEntity>({
       stage: 'pre',
       conditionsOp: 'and',
       conditions: [{ op: 'oneOf', field: 'imported_payee', value: fromNames }],
